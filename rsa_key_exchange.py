@@ -78,28 +78,34 @@ def create_key_exchange_packet(
     Create a key exchange packet with encrypted AES key
     
     Args:
-        sender_private_key: Sender's private key for signing
-        receiver_public_key: Receiver's public key for encryption
+        sender_private_key: Sender's private key for signing (PEM format)
+        receiver_public_key: Receiver's public key for encryption (PEM format)
         aes_key: AES key to exchange
     
     Returns:
         JSON-serializable packet with encrypted key and signature
     """
     from rsa_sign import sign_message as sign
+    from rsa_sign import load_private_key_pem
     import json
     
     # Encrypt the AES key
     encrypted_aes = encrypt_aes_key(receiver_public_key, aes_key)
     
-    # Sign the encrypted key for authenticity
-    signature = sign(sender_private_key, encrypted_aes)
+    # Load private key from PEM and sign the encrypted key
+    private_key_obj = load_private_key_pem(sender_private_key)
+    signature = sign(private_key_obj, encrypted_aes)
+    
+    # Export sender's public key (not private key!)
+    from rsa_sign import export_public_key_pem
+    sender_public_key_pem = export_public_key_pem(private_key_obj.public_key())
     
     # Create the packet
     packet = {
         "type": "key_exchange",
         "encrypted_aes_key": base64.b64encode(encrypted_aes).decode('utf-8'),
         "signature": base64.b64encode(signature).decode('utf-8'),
-        "sender_public_key": base64.b64encode(sender_private_key).decode('utf-8')
+        "sender_public_key": base64.b64encode(sender_public_key_pem).decode('utf-8')
     }
     
     return packet
@@ -123,14 +129,20 @@ def process_key_exchange_packet(
     Raises:
         ValueError: If signature verification fails
     """
-    from rsa_sign import verify_signature
+    from rsa_sign import verify_signature, load_public_key_pem
     
     # Decode the packet components
     encrypted_aes = base64.b64decode(packet["encrypted_aes_key"])
     signature = base64.b64decode(packet["signature"])
     
+    # Load public key from PEM if needed
+    if isinstance(sender_public_key, bytes):
+        sender_pub_obj = load_public_key_pem(sender_public_key)
+    else:
+        sender_pub_obj = sender_public_key
+    
     # Verify the signature
-    if not verify_signature(sender_public_key, encrypted_aes, signature):
+    if not verify_signature(sender_pub_obj, encrypted_aes, signature):
         raise ValueError("Key exchange signature verification failed!")
     
     # Decrypt the AES key
